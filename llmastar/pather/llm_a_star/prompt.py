@@ -384,4 +384,182 @@ Vertical Barriers: {vertical_barriers}
 
 gpt_prompt = {'standard': standard_gpt,'cot': cot_gpt, 'repe': repe_gpt}
 llama_prompt = {'standard': standard_llama, 'cot': cot_llama, 'repe': repe_llama}
+ 
+# ReAct prompt
+react_gpt = """
+You need to determine a collision-free path from the start point to the goal point while avoiding barriers. For each decision, first explain your reasoning and then propose an action. Your answer should follow this structure:
+
+1. Reason: Briefly describe the barrier or challenge that affects the direct path.
+2. Act: Specify the chosen intermediate waypoint or action that overcomes the challenge.
+
+Conclude your response with the generated path in the format:
+"Generated Path: [[x1, y1], [x2, y2], ...]"
+
+Example:
+Start Point: [5, 5]
+Goal Point: [20, 20]
+Horizontal Barriers: [[10, 0, 25], [15, 30, 50]]
+Vertical Barriers: [[25, 10, 22]]
+
+Step 1:
+Reason: The horizontal barrier at y=10 (x=0 to x=25) blocks the direct route.
+Act: Move to [26, 9] to bypass the barrier's upper corner.
+
+Step 2:
+Reason: Although clear from [26, 9], the vertical barrier at x=25 (y=10 to y=22) must be avoided.
+Act: Head to [25, 23] as a new waypoint.
+
+Step 3:
+Reason: With obstacles avoided, the final leg to the goal is unobstructed.
+Act: Proceed directly to [20, 20].
+
+Generated Path: [[5, 5], [26, 9], [25, 23], [20, 20]]
+
+Now, for the following input:
+Start Point: {start}
+Goal Point: {goal}
+Horizontal Barriers: {horizontal_barriers}
+Vertical Barriers: {vertical_barriers}
+Generated Path:
+"""
+
+# Step-back prompt
+step_back_gpt = """
+Your task is to design a collision-free path from the start to the goal while avoiding barriers. For each segment, provide a detailed explanation, then propose a waypoint. After a complete initial plan is formed, step back to re-evaluate each decision for possible improvements or corrections. Follow this structure:
+
+Segment 1:
+- Initial Choice: Propose an intermediate waypoint along with a brief explanation.
+- Evaluation: Reflect on the possibility of obstacles and consider any alternative improvement.
+- Final Choice: Confirm the waypoint after re-evaluation.
+
+Continue similarly for each segment until reaching the goal.
+
+Conclude your answer with the generated path in the format:
+"Generated Path: [[x1, y1], [x2, y2], ...]"
+
+Example:
+Start Point: [5, 5]
+Goal Point: [20, 20]
+Horizontal Barriers: [[10, 0, 25]]
+Vertical Barriers: [[25, 10, 22]]
+
+Segment 1 (from [5, 5]):
+- Initial Choice: [26, 9] to bypass the horizontal barrier.
+- Evaluation: [26, 9] provides ample clearance without approaching the barrier too closely.
+- Final Choice: Confirm [26, 9].
+
+Segment 2 (from [26, 9]):
+- Initial Choice: [25, 23] to avoid the vertical barrier.
+- Evaluation: [25, 23] is effective; alternative [24, 21] might be too close.
+- Final Choice: Confirm [25, 23].
+
+Segment 3:
+- Direct move to goal [20, 20] is clear.
+
+Generated Path: [[5, 5], [26, 9], [25, 23], [20, 20]]
+
+Now, apply this to:
+Start Point: {start}
+Goal Point: {goal}
+Horizontal Barriers: {horizontal_barriers}
+Vertical Barriers: {vertical_barriers}
+Generated Path:
+"""
+
+# Tree of Thoughts (ToT) prompt
+tot_gpt = """
+You must find the shortest collision-free path from the start to the goal. For each decision point, generate a small tree of candidate waypoints along with reasoning for each, then choose the best branch.
+
+Instructions:
+- For each decision step, list at least two candidate intermediate points with a brief reasoning for each.
+- After listing candidates, select the best candidate with an explanation.
+- Conclude with the final generated path in the format:
+"Generated Path: [[x1, y1], [x2, y2], ...]"
+
+Example:
+Start Point: [5, 5]
+Goal Point: [20, 20]
+Horizontal Barriers: [[10, 0, 25], [15, 30, 50]]
+Vertical Barriers: [[25, 10, 22]]
+
+Step 1 (from [5, 5]):
+Candidates:
+- Option A: [26, 9] – Reason: Clears the horizontal barrier's upper edge.
+- Option B: [24, 11] – Reason: Stays closer to the goal but risks collision with the barrier.
+Selection: Choose [26, 9] because it provides a safer clearance.
+
+Step 2 (from [26, 9]):
+Candidates:
+- Option A: [25, 23] – Reason: Effectively avoids the vertical barrier.
+- Option B: [23, 20] – Reason: Closer to goal but may be too tight.
+Selection: Choose [25, 23] for its clear avoidance.
+
+Step 3 (from [25, 23]):
+Directly move to [20, 20] as the path is now clear.
+
+Generated Path: [[5, 5], [26, 9], [25, 23], [20, 20]]
+
+Now, for the following input:
+Start Point: {start}
+Goal Point: {goal}
+Horizontal Barriers: {horizontal_barriers}
+Vertical Barriers: {vertical_barriers}
+Generated Path:
+"""
+
+# Add corresponding Llama prompts
+react_llama = """
+<|begin_of_text|>
+<|start_header_id|>system<|end_header_id|>
+You need to determine a collision-free path from the start point to the goal point while avoiding barriers. For each decision, first explain your reasoning and then propose an action.
+<|eot_id|>
+<|start_header_id|>user<|end_header_id|>
+Start Point: {start}
+Goal Point: {goal}
+Horizontal Barriers: {horizontal_barriers}
+Vertical Barriers: {vertical_barriers}
+<|eot_id|>
+<|start_header_id|>assistant<|end_header_id|>
+"""
+
+step_back_llama = """
+<|begin_of_text|>
+<|start_header_id|>system<|end_header_id|>
+Your task is to design a collision-free path from the start to the goal while avoiding barriers. For each segment, provide a detailed explanation, then propose a waypoint. After a complete initial plan is formed, step back to re-evaluate each decision for possible improvements or corrections.
+<|eot_id|>
+<|start_header_id|>user<|end_header_id|>
+Start Point: {start}
+Goal Point: {goal}
+Horizontal Barriers: {horizontal_barriers}
+Vertical Barriers: {vertical_barriers}
+<|eot_id|>
+<|start_header_id|>assistant<|end_header_id|>
+"""
+
+tot_llama = """
+<|begin_of_text|>
+<|start_header_id|>system<|end_header_id|>
+You must find the shortest collision-free path from the start to the goal. For each decision point, generate a small tree of candidate waypoints along with reasoning for each, then choose the best branch.
+<|eot_id|>
+<|start_header_id|>user<|end_header_id|>
+Start Point: {start}
+Goal Point: {goal}
+Horizontal Barriers: {horizontal_barriers}
+Vertical Barriers: {vertical_barriers}
+<|eot_id|>
+<|start_header_id|>assistant<|end_header_id|>
+"""
+
+# Update the prompt dictionaries
+gpt_prompt.update({
+    'react': react_gpt,
+    'step_back': step_back_gpt,
+    'tot': tot_gpt
+})
+
+llama_prompt.update({
+    'react': react_llama,
+    'step_back': step_back_llama,
+    'tot': tot_llama
+})
 

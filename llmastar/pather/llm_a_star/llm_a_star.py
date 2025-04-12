@@ -23,7 +23,7 @@ class LLMAStar:
         else:
             raise ValueError("Invalid LLM model. Choose 'gpt' or 'llama'.")
         
-        assert prompt in ['standard', 'cot', 'repe'], "Invalid prompt type. Choose 'standard', 'cot', or 'repe'."
+        assert prompt in ['standard', 'cot', 'repe', 'react', 'step_back', 'tot'], "Invalid prompt type. Choose 'standard', 'cot', 'repe', 'react', 'step_back', or 'tot'."
         self.prompt = prompt
 
     def _parse_query(self, query):
