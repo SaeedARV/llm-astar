@@ -1,11 +1,11 @@
 import torch
-from unsloth import FastLanguageModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 
 class Llama3:
     def __init__(self, hf_token=None):
-        # Using Unsloth's pre-quantized Llama 3 model
-        model_id = "unsloth/Meta-Llama-3.1-8B-bnb-4bit"
+        # Using a small open model (Phi-2)
+        model_id = "microsoft/phi-2"
         
         # Use provided token or try to get from environment
         token = hf_token or os.getenv("HF_TOKEN")
@@ -17,23 +17,42 @@ class Llama3:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        # Load model with Unsloth optimization
-        self.model, self.tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_id,
-            max_seq_length=2048,  # Unsloth's recommended length
-            dtype=None,  # Auto detection
-            load_in_4bit=True,  # Use 4bit quantization
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            trust_remote_code=True,
             token=token
         )
         
+        # Load model with 4-bit quantization if on GPU
+        if torch.cuda.is_available():
+            from transformers import BitsAndBytesConfig
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16
+            )
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=quantization_config,
+                trust_remote_code=True,
+                token=token
+            ).to(self.device)
+        else:
+            # Load without quantization on CPU
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                token=token
+            ).to(self.device)
+        
         # Set up terminators
         self.terminators = [
-            self.tokenizer.eos_token_id,
-            self.tokenizer.convert_tokens_to_ids("</s>")
+            self.tokenizer.eos_token_id
         ]
         
         # Set padding
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
     
     def ask(self, prompt):
@@ -45,16 +64,14 @@ class Llama3:
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        # Generate with Unsloth optimization
+        # Generate with standard generation
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=8000,
+                max_new_tokens=1024,
                 eos_token_id=self.terminators,
                 do_sample=False,
-                temperature=None,
-                top_p=None,
-                pad_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.pad_token_id
             )
         
         # Clear CUDA cache after generation
@@ -62,4 +79,4 @@ class Llama3:
             torch.cuda.empty_cache()
         
         # Decode and return
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)[len(prompt):]
+        return self.tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
