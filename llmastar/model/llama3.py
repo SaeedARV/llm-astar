@@ -36,27 +36,23 @@ class Llama3:
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
         
+        # Set device
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        
         # Load model with explicit device mapping
         self.model = transformers.AutoModelForCausalLM.from_pretrained(
             model_id,
             quantization_config=quantization_config,
-            device_map="auto",
+            device_map={"": self.device},  # Force all layers to same device
             torch_dtype=torch.float16,
             trust_remote_code=True,
             token=token
         )
-        
-        # Force model to CUDA if available
-        if torch.cuda.is_available():
-            self.model = self.model.to("cuda")
     
     def ask(self, prompt):
-        # Prepare inputs
+        # Prepare inputs and move to correct device
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
-        
-        # Move inputs to CUDA
-        if torch.cuda.is_available():
-            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
         # Generate
         with torch.no_grad():
