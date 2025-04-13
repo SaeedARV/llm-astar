@@ -4,8 +4,8 @@ import os
 
 class Llama3:
     def __init__(self, hf_token=None):
-        # Using a small open model (Phi-2)
-        model_id = "microsoft/phi-2"
+        # Using Google's Gemma 2B, small but powerful for reasoning
+        model_id = "google/gemma-2b"
         
         # Use provided token or try to get from environment
         token = hf_token or os.getenv("HF_TOKEN")
@@ -20,7 +20,6 @@ class Llama3:
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_id,
-            trust_remote_code=True,
             token=token
         )
         
@@ -34,14 +33,12 @@ class Llama3:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 quantization_config=quantization_config,
-                trust_remote_code=True,
                 token=token
             ).to(self.device)
         else:
             # Load without quantization on CPU
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_id,
-                trust_remote_code=True,
                 token=token
             ).to(self.device)
         
