@@ -21,7 +21,22 @@ class Llama3:
             bnb_4bit_use_double_quant=True,
         )
         
-        # Load model with quantization and authentication
+        # Load tokenizer first
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_id,
+            trust_remote_code=True,
+            token=token
+        )
+        
+        # Set up terminators and padding
+        self.terminators = [
+            self.tokenizer.eos_token_id,
+            self.tokenizer.convert_tokens_to_ids("</s>")
+        ]
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.padding_side = "left"
+        
+        # Load model with explicit device mapping
         self.model = transformers.AutoModelForCausalLM.from_pretrained(
             model_id,
             quantization_config=quantization_config,
@@ -31,32 +46,17 @@ class Llama3:
             token=token
         )
         
-        # Ensure model is on CUDA
+        # Force model to CUDA if available
         if torch.cuda.is_available():
-            self.model = self.model.cuda()
-        
-        # Load tokenizer with authentication
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_id,
-            trust_remote_code=True,
-            token=token
-        )
-        
-        # Set up terminators
-        self.terminators = [
-            self.tokenizer.eos_token_id,
-            self.tokenizer.convert_tokens_to_ids("</s>")
-        ]
-        
-        # Set padding
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.padding_side = "left"
+            self.model = self.model.to("cuda")
     
     def ask(self, prompt):
-        # Prepare inputs and move to CUDA
+        # Prepare inputs
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
+        
+        # Move inputs to CUDA
         if torch.cuda.is_available():
-            inputs = {k: v.cuda() for k, v in inputs.items()}
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
         
         # Generate
         with torch.no_grad():
