@@ -13,10 +13,6 @@ class Llama3:
         # Set device
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         
-        # Clear CUDA cache before loading model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_id,
@@ -33,13 +29,15 @@ class Llama3:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 quantization_config=quantization_config,
-                token=token
+                token=token,
+                low_cpu_mem_usage=True
             ).to(self.device)
         else:
             # Load without quantization on CPU
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_id,
-                token=token
+                token=token,
+                low_cpu_mem_usage=True
             ).to(self.device)
         
         # Set up terminators
@@ -53,27 +51,20 @@ class Llama3:
         self.tokenizer.padding_side = "left"
     
     def ask(self, prompt):
-        # Clear CUDA cache before generation
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
         # Prepare inputs
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        # Generate with standard generation
+        # Generate with standard generation - optimized for speed
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=1024,
                 eos_token_id=self.terminators,
                 do_sample=False,
-                pad_token_id=self.tokenizer.pad_token_id
+                pad_token_id=self.tokenizer.pad_token_id,
+                use_cache=True  # Ensure caching is enabled for faster generation
             )
-        
-        # Clear CUDA cache after generation
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         
         # Decode and return
         return self.tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
