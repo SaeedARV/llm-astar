@@ -13,7 +13,7 @@ class Llama3:
         if not token:
             raise ValueError("Hugging Face token is required to access the gated model. Please provide it via constructor or set HF_TOKEN environment variable.")
         
-        # Configure 4-bit quantization for Kaggle GPU
+        # Configure 4-bit quantization for CUDA
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.float16,
@@ -26,9 +26,14 @@ class Llama3:
             model_id,
             quantization_config=quantization_config,
             device_map="auto",
+            torch_dtype=torch.float16,
             trust_remote_code=True,
             token=token
         )
+        
+        # Ensure model is on CUDA
+        if torch.cuda.is_available():
+            self.model = self.model.cuda()
         
         # Load tokenizer with authentication
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -48,8 +53,10 @@ class Llama3:
         self.tokenizer.padding_side = "left"
     
     def ask(self, prompt):
-        # Prepare inputs
-        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True).to("cuda")
+        # Prepare inputs and move to CUDA
+        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
+        if torch.cuda.is_available():
+            inputs = {k: v.cuda() for k, v in inputs.items()}
         
         # Generate
         with torch.no_grad():
