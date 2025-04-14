@@ -7,13 +7,31 @@ from llmastar.model import ChatGPT, Llama3
 from llmastar.utils import is_lines_collision, list_parse
 from .prompt import *
 
+# Node class for the improved bidirectional A* algorithm
+class Node:
+    def __init__(self, position, parent=None):
+        self.position = position
+        self.parent = parent
+        self.g = 0  # The cost from the starting point to the current node
+        self.h = 0  # The heuristic estimated cost from the current node to the target node
+        self.f = 0  # Total cost g + h
+
+    def __eq__(self, other):
+        return self.position == other.position
+
+    def __lt__(self, other):
+        return self.f < other.f
+
+    def __hash__(self):
+        return hash(self.position)
+
 class LLMAStar:
     """LLM-A* algorithm with cost + heuristics as the priority."""
     
     GPT_METHOD = "PARSE"
     GPT_LLMASTAR_METHOD = "LLM-A*"
 
-    def __init__(self, llm='gpt', prompt='standard'):
+    def __init__(self, llm='gpt', prompt='standard', use_improved_astar=False):
         self.llm = llm
         if self.llm == 'gpt':
             self.parser = ChatGPT(method=self.GPT_METHOD, sysprompt=sysprompt_parse, example=example_parse)
@@ -25,6 +43,19 @@ class LLMAStar:
         
         assert prompt in ['standard', 'cot', 'repe', 'react', 'step_back', 'tot'], "Invalid prompt type. Choose 'standard', 'cot', 'repe', 'react', 'step_back', or 'tot'."
         self.prompt = prompt
+        self.use_improved_astar = use_improved_astar
+
+    def search(self, query, filepath='temp.png'):
+        """
+        Main search method that uses either original A* or improved A* depending on the configuration.
+        :param query: The search query containing environment information
+        :param filepath: Path to save the visualization
+        :return: Path and search metrics
+        """
+        if self.use_improved_astar:
+            return self.searching_improved(query, filepath)
+        else:
+            return self.searching(query, filepath)
 
     def _parse_query(self, query):
         """Parse input query using the specified LLM model."""
@@ -155,9 +186,281 @@ class LLMAStar:
         self.plot.animation(path, visited, True, "LLM-A*", self.filepath)
         return result
 
+    def searching_improved(self, query, filepath='temp.png'):
+        """
+        Improved bidirectional A* searching algorithm.
+        :return: Path and search metrics.
+        """
+        self.filepath = filepath
+        print(query)
+        input_data = self._parse_query(query)
+        self._initialize_parameters(input_data)
+        self._initialize_llm_paths()
+        
+        # Create a grid representation for the improved A* algorithm
+        grid_size_x = self.range_x[1] + 2
+        grid_size_y = self.range_y[1] + 2
+        grid = [[0 for _ in range(grid_size_y)] for _ in range(grid_size_x)]
+        
+        # Mark obstacles in the grid
+        for pos in self.obs:
+            if 0 <= pos[0] < grid_size_x and 0 <= pos[1] < grid_size_y:
+                grid[pos[0]][pos[1]] = 1
+        
+        # Initialize bidirectional A* components
+        open_list_start = []
+        open_list_goal = []
+        closed_list_start = set()
+        closed_list_goal = set()
+        start_node = Node(self.s_start)
+        goal_node = Node(self.s_goal)
+        
+        # Set initial target from LLM suggestions
+        if len(self.target_list) > 1:
+            waypoint_node = Node(self.target_list[1])
+            # Adjust start node's heuristic to include the waypoint
+            start_node.h = self._manhattan_distance(self.s_start, self.target_list[1]) + self._manhattan_distance(self.target_list[1], self.s_goal)
+            start_node.f = start_node.g + start_node.h
+        else:
+            waypoint_node = goal_node
+            start_node.h = self._manhattan_distance(self.s_start, self.s_goal)
+            start_node.f = start_node.g + start_node.h
+        
+        # Initialize goal node's heuristic as well
+        goal_node.h = self._manhattan_distance(self.s_goal, self.s_start)
+        goal_node.f = goal_node.g + goal_node.h
+        
+        heapq.heappush(open_list_start, start_node)
+        heapq.heappush(open_list_goal, goal_node)
+        
+        search_path_start = []
+        search_path_goal = []
+        
+        # Path construction functions for bidirectional search
+        def build_path(meet_node, start_direction=True):
+            path = []
+            current = meet_node
+            while current:
+                path.append(current.position)
+                current = current.parent
+            if not start_direction:
+                path = path[::-1]
+            return path
+        
+        def meet_in_the_middle():
+            # Check if any node from start side meets any node from goal side
+            for start_node in closed_list_start:
+                if any(goal_node.position == start_node.position for goal_node in closed_list_goal):
+                    meet_position = start_node.position
+                    # Find the corresponding nodes in both directions
+                    start_meet_node = next(node for node in closed_list_start if node.position == meet_position)
+                    goal_meet_node = next(node for node in closed_list_goal if node.position == meet_position)
+                    
+                    # Build paths from both directions
+                    path_start = build_path(start_meet_node)
+                    path_goal = build_path(goal_meet_node, start_direction=False)
+                    
+                    # Remove duplicated meeting point
+                    return path_start[:-1] + path_goal
+            
+            # If no meeting point found
+            return None
+        
+        # Process LLM waypoints for guidance
+        waypoints = self.target_list[1:-1]  # Exclude start and goal
+        current_waypoint_idx = 0
+        current_waypoint = waypoints[current_waypoint_idx] if waypoints else None
+        
+        # Counter to limit iterations and prevent infinite loops
+        max_iterations = min(1000, grid_size_x * grid_size_y * 2)
+        iteration_count = 0
+        
+        while open_list_start and open_list_goal and iteration_count < max_iterations:
+            iteration_count += 1
+            
+            # Process from start direction
+            if open_list_start:
+                current_node_start = heapq.heappop(open_list_start)
+                closed_list_start.add(current_node_start)
+                search_path_start.append(current_node_start.position)
+                
+                # Check if we've reached the goal directly
+                if current_node_start.position == self.s_goal:
+                    path = build_path(current_node_start)
+                    result = {
+                        "operation": len(closed_list_start) + len(closed_list_goal),
+                        "storage": len(closed_list_start) + len(closed_list_goal),
+                        "length": sum(self._euclidean_distance(path[i], path[i+1]) for i in range(len(path)-1)),
+                        "llm_output": self.target_list
+                    }
+                    print(result)
+                    visited = list(node.position for node in closed_list_start) + list(node.position for node in closed_list_goal)
+                    self.plot.animation(path, visited, True, "LLM-A* Improved", self.filepath)
+                    return result
+            
+            # Process from goal direction
+            if open_list_goal:
+                current_node_goal = heapq.heappop(open_list_goal)
+                closed_list_goal.add(current_node_goal)
+                search_path_goal.append(current_node_goal.position)
+                
+                # Check if we've reached the start directly
+                if current_node_goal.position == self.s_start:
+                    path = build_path(current_node_goal, start_direction=False)
+                    result = {
+                        "operation": len(closed_list_start) + len(closed_list_goal),
+                        "storage": len(closed_list_start) + len(closed_list_goal),
+                        "length": sum(self._euclidean_distance(path[i], path[i+1]) for i in range(len(path)-1)),
+                        "llm_output": self.target_list
+                    }
+                    print(result)
+                    visited = list(node.position for node in closed_list_start) + list(node.position for node in closed_list_goal)
+                    self.plot.animation(path, visited, True, "LLM-A* Improved", self.filepath)
+                    return result
+            
+            # Check if we've reached the waypoint and update to next waypoint
+            if current_waypoint and current_node_start.position == current_waypoint:
+                current_waypoint_idx += 1
+                if current_waypoint_idx < len(waypoints):
+                    current_waypoint = waypoints[current_waypoint_idx]
+                else:
+                    current_waypoint = None
+            
+            # Check if paths from both directions have met
+            merged_path = meet_in_the_middle()
+            if merged_path:
+                # Return combined metrics
+                result = {
+                    "operation": len(closed_list_start) + len(closed_list_goal),
+                    "storage": len(closed_list_start) + len(closed_list_goal),
+                    "length": sum(self._euclidean_distance(merged_path[i], merged_path[i+1]) for i in range(len(merged_path)-1)),
+                    "llm_output": self.target_list
+                }
+                print(result)
+                
+                # Visualize the path and search process
+                visited = list(node.position for node in closed_list_start) + list(node.position for node in closed_list_goal)
+                self.plot.animation(merged_path, visited, True, "LLM-A* Improved", self.filepath)
+                
+                return result
+            
+            # Process neighbors in start direction
+            if open_list_start:
+                for dx, dy in self.u_set:
+                    neighbor_pos = (current_node_start.position[0] + dx, current_node_start.position[1] + dy)
+                    
+                    # Check if position is valid
+                    if (neighbor_pos in self.obs or 
+                        neighbor_pos[0] < 0 or neighbor_pos[0] >= grid_size_x or 
+                        neighbor_pos[1] < 0 or neighbor_pos[1] >= grid_size_y):
+                        continue
+                    
+                    # Skip if this neighbor is already processed
+                    if any(node.position == neighbor_pos for node in closed_list_start):
+                        continue
+                    
+                    neighbor = Node(neighbor_pos, current_node_start)
+                    
+                    # Calculate cost
+                    move_cost = self._euclidean_distance(current_node_start.position, neighbor_pos)
+                    neighbor.g = current_node_start.g + move_cost
+                    
+                    # LLM-guided heuristic that considers waypoints
+                    if current_waypoint:
+                        # Consider both the next waypoint and the final goal
+                        waypoint_dist = self._manhattan_distance(neighbor_pos, current_waypoint)
+                        goal_dist = self._manhattan_distance(current_waypoint, self.s_goal)
+                        neighbor.h = waypoint_dist + goal_dist
+                    else:
+                        # Direct path to goal
+                        neighbor.h = self._manhattan_distance(neighbor_pos, self.s_goal)
+                    
+                    neighbor.f = neighbor.g + neighbor.h
+                    
+                    # Check if this is a better path if the node is already in open list
+                    existing_node_idx = None
+                    for i, open_node in enumerate(open_list_start):
+                        if open_node.position == neighbor_pos:
+                            existing_node_idx = i
+                            break
+                    
+                    if existing_node_idx is not None:
+                        if neighbor.f < open_list_start[existing_node_idx].f:
+                            # Replace with better path
+                            open_list_start[existing_node_idx] = neighbor
+                            # Reorder the heap after modification
+                            heapq.heapify(open_list_start)
+                    else:
+                        # Add new node to open list
+                        heapq.heappush(open_list_start, neighbor)
+                        search_path_start.append(neighbor_pos)
+            
+            # Process neighbors in goal direction
+            if open_list_goal:
+                for dx, dy in self.u_set:
+                    neighbor_pos = (current_node_goal.position[0] + dx, current_node_goal.position[1] + dy)
+                    
+                    # Check if position is valid
+                    if (neighbor_pos in self.obs or 
+                        neighbor_pos[0] < 0 or neighbor_pos[0] >= grid_size_x or 
+                        neighbor_pos[1] < 0 or neighbor_pos[1] >= grid_size_y):
+                        continue
+                    
+                    # Skip if this neighbor is already processed
+                    if any(node.position == neighbor_pos for node in closed_list_goal):
+                        continue
+                    
+                    neighbor = Node(neighbor_pos, current_node_goal)
+                    
+                    # Calculate cost
+                    move_cost = self._euclidean_distance(current_node_goal.position, neighbor_pos)
+                    neighbor.g = current_node_goal.g + move_cost
+                    
+                    # Calculate heuristic to start
+                    neighbor.h = self._manhattan_distance(neighbor_pos, self.s_start)
+                    neighbor.f = neighbor.g + neighbor.h
+                    
+                    # Check if this is a better path if the node is already in open list
+                    existing_node_idx = None
+                    for i, open_node in enumerate(open_list_goal):
+                        if open_node.position == neighbor_pos:
+                            existing_node_idx = i
+                            break
+                    
+                    if existing_node_idx is not None:
+                        if neighbor.f < open_list_goal[existing_node_idx].f:
+                            # Replace with better path
+                            open_list_goal[existing_node_idx] = neighbor
+                            # Reorder the heap after modification
+                            heapq.heapify(open_list_goal)
+                    else:
+                        # Add new node to open list
+                        heapq.heappush(open_list_goal, neighbor)
+                        search_path_goal.append(neighbor_pos)
+        
+        # If no path found
+        result = {
+            "operation": len(closed_list_start) + len(closed_list_goal),
+            "storage": len(closed_list_start) + len(closed_list_goal),
+            "length": 0,
+            "llm_output": self.target_list
+        }
+        print("No path found.")
+        print(result)
+        
+        # Visualize the search process even if no path is found
+        visited = list(node.position for node in closed_list_start) + list(node.position for node in closed_list_goal)
+        self.plot.animation([], visited, True, "LLM-A* Improved (No Path)", self.filepath)
+        
+        return result
+
     @staticmethod
     def _euclidean_distance(p1, p2):
         return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+    
+    @staticmethod
+    def _manhattan_distance(p1, p2):
+        return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
 
     def _update_queue(self):
         queue = []
