@@ -411,55 +411,56 @@ def read_data_from_excel(file_path):
     return grid, start, goal
 
 
-# main function
-file_path = 'GridMap1.xlsx'
-grid, start, goal = read_data_from_excel(file_path)
-
-# Record the start time
-start_time = time.time()
-
-path1, path2, search_path_start, search_path_goal = a_star_bidirectional(start, goal, grid)
-
-# Record the end time
-end_time = time.time()
-
-# Calculate the time difference
-execution_time = end_time - start_time
-
-
-# Calculate the path length
 def euclidean_distance(p1, p2):
     return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
 
-path = path2 + path1
-path = optimize_path(path, grid, goal)
-if path:
-    path_length = sum(euclidean_distance(path[i], path[i - 1]) for i in range(1, len(path)))
-else:
-    path_length = 0
+# Only run if this script is executed directly (not when imported)
+if __name__ == "__main__":
+    # main function
+    file_path = 'GridMap1.xlsx'
+    grid, start, goal = read_data_from_excel(file_path)
 
-# Remove duplicate nodes from search_path
-unique_search_path_start = []
-visited_start = set()
-for node in search_path_start:
-    if node not in visited_start:
-        unique_search_path_start.append(node)
-        visited_start.add(node)
+    # Record the start time
+    start_time = time.time()
 
-unique_search_path_goal = []
-visited_goal = set()
-for node in search_path_goal:
-    if node not in visited_goal:
-        unique_search_path_goal.append(node)
-        visited_goal.add(node)
+    path1, path2, search_path_start, search_path_goal = a_star_bidirectional(start, goal, grid)
 
-# output
-print(f"Number of Extended Nodes (Start Direction): {len(unique_search_path_start)}")
-print(f"Number of Extension Nodes (End Direction): {len(unique_search_path_goal)}")
-print(f"Path Length: {path_length:.6f}")
-print(f"Number of Path Points: {len(path1) if path1 else 0}")
-print(f"Time (s): {execution_time:.6f}")
+    # Record the end time
+    end_time = time.time()
 
-# Draw a grid diagram
-plot_grid(grid, unique_search_path_start, unique_search_path_goal, path, [], start, goal)
+    # Calculate the time difference
+    execution_time = end_time - start_time
+
+    # Calculate the path length
+    path = path2 + path1
+    path = optimize_path(path, grid, goal)
+    if path:
+        path_length = sum(euclidean_distance(path[i], path[i - 1]) for i in range(1, len(path)))
+    else:
+        path_length = 0
+
+    # Remove duplicate nodes from search_path
+    unique_search_path_start = []
+    visited_start = set()
+    for node in search_path_start:
+        if node not in visited_start:
+            unique_search_path_start.append(node)
+            visited_start.add(node)
+
+    unique_search_path_goal = []
+    visited_goal = set()
+    for node in search_path_goal:
+        if node not in visited_goal:
+            unique_search_path_goal.append(node)
+            visited_goal.add(node)
+
+    # output
+    print(f"Number of Extended Nodes (Start Direction): {len(unique_search_path_start)}")
+    print(f"Number of Extension Nodes (End Direction): {len(unique_search_path_goal)}")
+    print(f"Path Length: {path_length:.6f}")
+    print(f"Number of Path Points: {len(path1) if path1 else 0}")
+    print(f"Time (s): {execution_time:.6f}")
+
+    # Draw a grid diagram
+    plot_grid(grid, unique_search_path_start, unique_search_path_goal, path, [], start, goal)

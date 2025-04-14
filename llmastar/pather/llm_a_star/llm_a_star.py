@@ -10,12 +10,21 @@ from llmastar.utils import is_lines_collision, list_parse
 from .prompt import *
 
 # Import the improved A* implementation directly
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../improved_a_star')))
+IMPROVED_ASTAR_AVAILABLE = False
 try:
+    # Add the improved_a_star directory to the Python path
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../improved_a_star')))
+    
+    # Try to import the necessary functions from A_star_improved2.py
     from A_star_improved2 import a_star_bidirectional, optimize_path, Node as ImprovedNode
+    
+    # Mark import as successful
     IMPROVED_ASTAR_AVAILABLE = True
-except ImportError:
-    print("Warning: A_star_improved2.py not found. Using fallback implementation.")
+    print("Successfully imported A_star_improved2 module")
+except Exception as e:
+    # Catch any import errors or file not found errors
+    print(f"Warning: Could not import from A_star_improved2.py. Error: {str(e)}")
+    print("Using fallback implementation for improved A* algorithm.")
     IMPROVED_ASTAR_AVAILABLE = False
 
 # Node class for the improved bidirectional A* algorithm
