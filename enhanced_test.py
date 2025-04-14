@@ -12,37 +12,36 @@ import random
 from llmastar.pather import AStar, LLMAStar
 from tabulate import tabulate
 
-# Load dataset
-def load_scenarios():
+# Load the latest complex grid from the dataset
+def load_latest_grid():
     with open('dataset/environment_50_30.json', 'r') as f:
         data = json.load(f)
     
-    # Select three random scenarios from the dataset
-    selected_scenarios = random.sample(data, 3)
-    scenarios = []
+    # Get the latest added grid (the last one in the list)
+    latest_grid = data[-1]
     
-    for i, scenario_data in enumerate(selected_scenarios):
-        # Take the first start_goal pair from each scenario
-        start_goal = scenario_data['start_goal'][0]
-        
-        scenario = {
-            "name": f"Dataset Map {scenario_data['id']}",
-            "query": {
-                "start": start_goal[0],
-                "goal": start_goal[1],
-                "size": [51, 31],
-                "horizontal_barriers": scenario_data['horizontal_barriers'],
-                "vertical_barriers": scenario_data['vertical_barriers'],
-                "range_x": scenario_data['range_x'],
-                "range_y": scenario_data['range_y']
-            }
+    # Create a scenario from it
+    scenario = {
+        "name": f"Complex Grid {latest_grid['id']}",
+        "query": {
+            "start": latest_grid['start_goal'][0][0],
+            "goal": latest_grid['start_goal'][0][1],
+            "size": [latest_grid['range_x'][1], latest_grid['range_y'][1]],
+            "horizontal_barriers": latest_grid['horizontal_barriers'],
+            "vertical_barriers": latest_grid['vertical_barriers'],
+            "range_x": latest_grid['range_x'],
+            "range_y": latest_grid['range_y']
         }
-        scenarios.append(scenario)
+    }
     
-    return scenarios
+    print(f"Loaded complex grid with ID {latest_grid['id']}")
+    print(f"Grid dimensions: {latest_grid['range_x'][1]}x{latest_grid['range_y'][1]}")
+    print(f"Start: {latest_grid['start_goal'][0][0]}, Goal: {latest_grid['start_goal'][0][1]}")
+    
+    return [scenario]  # Return as a list to maintain compatibility with existing code
 
-# Use dataset scenarios
-scenarios = load_scenarios()
+# Use the latest complex grid
+scenarios = load_latest_grid()
 
 # Define different LLM configurations to test
 llm_configs = [
@@ -266,14 +265,6 @@ def create_comparison_table(results, scenario):
         "100" if a_star_result.get("valid_path", False) else "0"
     ])
     
-    # Add Dynamic WA* (w=2) row with placeholder values
-    # These are example values based on the image provided
-    table_data.append([
-        "Dynamic WA* (w = 2)", "-", "-", "-",
-        "60.91", "78.53", "100.24",
-        "100"
-    ])
-    
     # Group results by algorithm type (standard vs improved)
     standard_results = {name: result for name, result in results.items() 
                       if "Llama" in name and "Improved" not in name}
@@ -323,6 +314,9 @@ def create_comparison_table(results, scenario):
     return table
 
 def main():
+    # Create a results directory
+    results_dir = 'test_results'
+    os.makedirs(results_dir, exist_ok=True)
         
     for scenario in scenarios:
         print(f"\nTesting scenario: {scenario['name']}")
@@ -348,6 +342,12 @@ def main():
         print(f"\nComparison Table for {scenario['name']}:")
         print(table)
         
+        # Save table to file
+        table_file = os.path.join(results_dir, f"{scenario['name'].lower().replace(' ', '_')}_comparison.txt")
+        with open(table_file, 'w') as f:
+            f.write(f"Comparison Table for {scenario['name']}:\n")
+            f.write(table)
+        
         # Print detailed results
         print("\nDetailed Results:")
         for name, result in results.items():
@@ -365,6 +365,27 @@ def main():
             print(f"  Path Length: {path_length}")
             print(f"  Path Status: {path_status}")
             print("")
+        
+        # Save detailed results to file
+        details_file = os.path.join(results_dir, f"{scenario['name'].lower().replace(' ', '_')}_details.txt")
+        with open(details_file, 'w') as f:
+            f.write(f"Detailed Results for {scenario['name']}:\n\n")
+            for name, result in results.items():
+                path_status = "Valid" if result.get("valid_path", False) else "Invalid"
+                path_length = result.get("path_length", float('inf'))
+                if path_length == float('inf'):
+                    path_length = "N/A"
+                else:
+                    path_length = f"{path_length:.2f}"
+                
+                f.write(f"{name}:\n")
+                f.write(f"  Time: {result.get('time', 0):.2f}s\n")
+                f.write(f"  Operations: {result.get('operation_count', 0)}\n")
+                f.write(f"  Storage: {result.get('storage_used', 0)}\n")
+                f.write(f"  Path Length: {path_length}\n")
+                f.write(f"  Path Status: {path_status}\n\n")
+        
+        print(f"Results saved to {results_dir} directory.")
 
 if __name__ == "__main__":
     main() 
