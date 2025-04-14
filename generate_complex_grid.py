@@ -217,7 +217,7 @@ def main():
     parser = argparse.ArgumentParser(description='Generate complex grid maps for A* testing')
     parser.add_argument('--width', type=int, default=30, help='Width of the grid')
     parser.add_argument('--height', type=int, default=15, help='Height of the grid')
-    parser.add_argument('--density', type=float, default=0.3, help='Obstacle density (0.0-1.0)')
+    parser.add_argument('--density', type=float, default=0.2, help='Obstacle density (0.0-1.0)')
     parser.add_argument('--count', type=int, default=1, help='Number of grid maps to generate')
     
     args = parser.parse_args()
