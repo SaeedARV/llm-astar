@@ -46,6 +46,24 @@ scenarios = load_latest_grid()
 # Define different LLM configurations to test
 llm_configs = [
     {
+        "name": "Llama ReAct (Improved)",
+        "llm": "llama",
+        "prompt": "react",
+        "use_improved_astar": True
+    },
+    {
+        "name": "Llama Step-Back (Improved)",
+        "llm": "llama",
+        "prompt": "step_back",
+        "use_improved_astar": True
+    },
+    {
+        "name": "Llama Tree-of-Thoughts (Improved)",
+        "llm": "llama",
+        "prompt": "tot",
+        "use_improved_astar": True
+    },
+    {
         "name": "Llama Standard",
         "llm": "llama",
         "prompt": "standard",
@@ -62,24 +80,6 @@ llm_configs = [
         "llm": "llama",
         "prompt": "repe",
         "use_improved_astar": False
-    },
-    {
-        "name": "Llama ReAct",
-        "llm": "llama",
-        "prompt": "react",
-        "use_improved_astar": True
-    },
-    {
-        "name": "Llama Step-Back",
-        "llm": "llama",
-        "prompt": "step_back",
-        "use_improved_astar": True
-    },
-    {
-        "name": "Llama Tree-of-Thoughts",
-        "llm": "llama",
-        "prompt": "tot",
-        "use_improved_astar": True
     },
     # Add improved versions with bidirectional A*
     {
