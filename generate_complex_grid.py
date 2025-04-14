@@ -13,7 +13,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 
-def generate_complex_gridmap(width=50, height=30, obstacle_density=0.3):
+def generate_complex_gridmap(width=30, height=15, obstacle_density=0.3):
     """
     Generate a complex grid-based environment with maze-like structures.
     
@@ -215,8 +215,8 @@ def save_gridmap_visualization(grid, start, goal, filepath):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate complex grid maps for A* testing')
-    parser.add_argument('--width', type=int, default=50, help='Width of the grid')
-    parser.add_argument('--height', type=int, default=30, help='Height of the grid')
+    parser.add_argument('--width', type=int, default=30, help='Width of the grid')
+    parser.add_argument('--height', type=int, default=15, help='Height of the grid')
     parser.add_argument('--density', type=float, default=0.3, help='Obstacle density (0.0-1.0)')
     parser.add_argument('--count', type=int, default=1, help='Number of grid maps to generate')
     
