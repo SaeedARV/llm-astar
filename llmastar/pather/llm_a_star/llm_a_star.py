@@ -64,6 +64,8 @@ class LLMAStar:
         assert prompt in ['standard', 'cot', 'repe', 'react', 'step_back', 'tot'], "Invalid prompt type. Choose 'standard', 'cot', 'repe', 'react', 'step_back', or 'tot'."
         self.prompt = prompt
         self.use_improved_astar = use_improved_astar
+        # Flag to indicate if this instance is processing a path segment (no LLM calls needed)
+        self.is_segment_processing = False
 
     def search(self, query, filepath='temp.png'):
         """
@@ -115,6 +117,16 @@ class LLMAStar:
     def _initialize_llm_paths(self):
         """Initialize paths using LLM suggestions."""
         start, goal = list(self.s_start), list(self.s_goal)
+        
+        # If this is a segment processing, don't call the LLM, just use start and goal directly
+        if hasattr(self, 'is_segment_processing') and self.is_segment_processing:
+            print("Segment processing: Using direct A* without LLM calls")
+            self.target_list = [self.s_start, self.s_goal]
+            self.i = 1
+            self.s_target = self.s_goal
+            print(self.target_list[0], self.s_target)
+            return
+            
         query = self._generate_llm_query(start, goal)
 
         if self.llm == 'gpt':
