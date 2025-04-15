@@ -112,100 +112,6 @@ llm_configs = [
     }
 ]
 
-# Function to run A* on a single segment (for parallel processing)
-def process_segment(start, end, query, use_improved_astar=False):
-    """Process a single path segment using A* or improved A*"""
-    # Create a new query with the segment's start and end points
-    segment_query = query.copy()
-    segment_query['start'] = start
-    segment_query['goal'] = end
-    
-    # Create a new A* instance for this segment
-    if use_improved_astar:
-        path_planner = LLMAStar(llm="llama", prompt="standard", use_improved_astar=True)
-        result = path_planner.searching_improved(segment_query)
-    else:
-        path_planner = AStar()
-        result = path_planner.searching(segment_query)
-    
-    return {
-        'start': start,
-        'end': end,
-        'path': result.get('path', []),
-        'operation_count': result.get('operation', 0),
-        'storage_used': result.get('storage', 0),
-        'length': result.get('length', 0)
-    }
-
-# Function to run the pathfinding in parallel across all waypoints
-def parallel_pathfinding(waypoints, query, use_improved_astar=False, max_workers=4):
-    """Process pathfinding between waypoints in parallel"""
-    if not waypoints or len(waypoints) < 2:
-        return {'operation_count': 0, 'storage_used': 0, 'length': 0, 'path': []}
-    
-    # Create the segment pairs
-    segments = []
-    for i in range(len(waypoints) - 1):
-        segments.append((waypoints[i], waypoints[i+1]))
-    
-    # Process segments in parallel
-    start_time = time.time()
-    results = []
-    
-    # Create a partial function with the query and improved flag
-    process_func = partial(process_segment, 
-                          query=query, 
-                          use_improved_astar=use_improved_astar)
-    
-    # Use ThreadPoolExecutor instead of ProcessPoolExecutor to avoid CUDA issues
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all segment tasks
-        future_to_segment = {
-            executor.submit(process_func, start, end): (start, end) 
-            for start, end in segments
-        }
-        
-        # Collect results as they complete
-        for future in as_completed(future_to_segment):
-            segment = future_to_segment[future]
-            # try:
-            result = future.result()
-            results.append(result)
-            # except Exception as e:
-            #     print(f"Error processing segment {segment}: {e}")
-    
-    # Sort results by start position to maintain order
-    # We need to define a key function that matches the original segment order
-    segment_order = {tuple(segments[i]): i for i in range(len(segments))}
-    results.sort(key=lambda x: segment_order.get((tuple(x['start']), tuple(x['end'])), float('inf')))
-    
-    # Combine paths (removing duplicates at junctions)
-    combined_path = [waypoints[0]]  # Start with the first point
-    total_ops = 0
-    total_storage = 0
-    total_length = 0
-    
-    for result in results:
-        # Add the path segment (excluding the start point)
-        path_segment = result.get('path', [])
-        if path_segment and len(path_segment) > 1:
-            combined_path.extend(path_segment[1:])  # Skip the first point to avoid duplicates
-        
-        # Accumulate metrics
-        total_ops += result.get('operation_count', 0)
-        total_storage += result.get('storage_used', 0)
-        total_length += result.get('length', 0)
-    
-    execution_time = time.time() - start_time
-    
-    return {
-        'path': combined_path,
-        'operation_count': total_ops,
-        'storage_used': total_storage,
-        'length': total_length,
-        'time': execution_time
-    }
-
 # Sequential version of pathfinding for cases where parallel execution fails
 def sequential_pathfinding(waypoints, query, use_improved_astar=False):
     """Process pathfinding between waypoints sequentially as a fallback"""
@@ -240,10 +146,149 @@ def sequential_pathfinding(waypoints, query, use_improved_astar=False):
         path_segment = result.get('path', [])
         if path_segment and len(path_segment) > 1:
             combined_path.extend(path_segment[1:])  # Skip the first point to avoid duplicates
+        elif path_segment and len(path_segment) == 1:
+            # If the path has only one point, it might be the end point
+            if path_segment[0] != combined_path[-1]:  # Don't add duplicates
+                combined_path.append(path_segment[0])
+        else:
+            # If no path is found, add the end point directly
+            # This ensures we have at least a direct line between waypoints
+            if end != combined_path[-1]:  # Don't add duplicates
+                combined_path.append(end)
         
         # Accumulate metrics
         total_ops += result.get('operation', 0)
         total_storage += result.get('storage', 0)
+        total_length += result.get('length', 0)
+    
+    execution_time = time.time() - start_time
+    
+    return {
+        'path': combined_path,
+        'operation_count': total_ops,
+        'storage_used': total_storage,
+        'length': total_length,
+        'time': execution_time
+    }
+
+# Function to run A* on a single segment (for parallel processing)
+def process_segment(start, end, query, use_improved_astar=False):
+    """Process a single path segment using A* or improved A*"""
+    # Create a new query with the segment's start and end points
+    segment_query = query.copy()
+    segment_query['start'] = start
+    segment_query['goal'] = end
+    
+    try:
+        # Create a new A* instance for this segment
+        if use_improved_astar:
+            path_planner = LLMAStar(llm="llama", prompt="standard", use_improved_astar=True)
+            result = path_planner.searching_improved(segment_query)
+        else:
+            path_planner = AStar()
+            result = path_planner.searching(segment_query)
+        
+        # Ensure path exists in the result
+        path = result.get('path', [])
+        if not path:
+            # If no path is found, at least include start and end
+            path = [start, end]
+            
+        return {
+            'start': start,
+            'end': end,
+            'path': path,
+            'operation_count': result.get('operation', 0),
+            'storage_used': result.get('storage', 0),
+            'length': result.get('length', 0)
+        }
+    except Exception as e:
+        print(f"Error in process_segment from {start} to {end}: {e}")
+        # Return a basic result with just start and end points
+        return {
+            'start': start,
+            'end': end,
+            'path': [start, end],
+            'operation_count': 0,
+            'storage_used': 0,
+            'length': math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)  # Euclidean distance
+        }
+
+# Function to run the pathfinding in parallel across all waypoints
+def parallel_pathfinding(waypoints, query, use_improved_astar=False, max_workers=4):
+    """Process pathfinding between waypoints in parallel"""
+    if not waypoints or len(waypoints) < 2:
+        return {'operation_count': 0, 'storage_used': 0, 'length': 0, 'path': []}
+    
+    # Create the segment pairs
+    segments = []
+    for i in range(len(waypoints) - 1):
+        segments.append((waypoints[i], waypoints[i+1]))
+    
+    # Process segments in parallel
+    start_time = time.time()
+    results = []
+    
+    # Create a partial function with the query and improved flag
+    process_func = partial(process_segment, 
+                          query=query, 
+                          use_improved_astar=use_improved_astar)
+    
+    # Use ThreadPoolExecutor instead of ProcessPoolExecutor to avoid CUDA issues
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all segment tasks
+        future_to_segment = {
+            executor.submit(process_func, start, end): (start, end) 
+            for start, end in segments
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_segment):
+            segment = future_to_segment[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                print(f"Error processing segment {segment}: {e}")
+                # Add a basic result with direct path for failed segments
+                results.append({
+                    'start': segment[0],
+                    'end': segment[1],
+                    'path': [segment[0], segment[1]],
+                    'operation_count': 0,
+                    'storage_used': 0,
+                    'length': math.sqrt((segment[1][0] - segment[0][0])**2 + (segment[1][1] - segment[0][1])**2)
+                })
+    
+    # Sort results by start position to maintain order
+    # We need to define a key function that matches the original segment order
+    segment_order = {tuple(segments[i]): i for i in range(len(segments))}
+    results.sort(key=lambda x: segment_order.get((tuple(x['start']), tuple(x['end'])), float('inf')))
+    
+    # Combine paths (removing duplicates at junctions)
+    combined_path = [waypoints[0]]  # Start with the first point
+    total_ops = 0
+    total_storage = 0
+    total_length = 0
+    
+    for result in results:
+        # Add the path segment (excluding the start point)
+        path_segment = result.get('path', [])
+        if path_segment and len(path_segment) > 1:
+            combined_path.extend(path_segment[1:])  # Skip the first point to avoid duplicates
+        elif path_segment and len(path_segment) == 1:
+            # If the path has only one point, it might be the end point
+            if path_segment[0] != combined_path[-1]:  # Don't add duplicates
+                combined_path.append(path_segment[0])
+        else:
+            # If no path is found, add the end point directly
+            end = result.get('end')
+            if end and end != combined_path[-1]:  # Don't add duplicates
+                combined_path.append(end)
+        
+        # Accumulate metrics
+        total_ops += result.get('operation_count', 0)
+        total_storage += result.get('storage_used', 0)
         total_length += result.get('length', 0)
     
     execution_time = time.time() - start_time

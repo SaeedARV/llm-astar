@@ -384,11 +384,23 @@ def is_line_clear(start, end, grid):
     False -- If there are obstacles
     """
     line_points = get_line_points(start, end)
-
+    
+    # Get grid dimensions for bounds checking
+    grid_height = len(grid)
+    if grid_height == 0:
+        return True  # Empty grid
+    grid_width = len(grid[0])
+    
     for (x, y) in line_points:
-        if grid[x][y] == 1:  # Note grid[y][x] here, not grid[x][y]
+        # Check if point is within grid bounds
+        if 0 <= x < grid_height and 0 <= y < grid_width:
+            # Access grid with proper indices (grid[x][y] since points are (x,y))
+            if grid[x][y] == 1:
+                return False
+        else:
+            # Points outside grid are considered obstacles
             return False
-
+    
     return True
 
 
