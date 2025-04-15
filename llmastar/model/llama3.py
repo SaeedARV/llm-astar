@@ -15,10 +15,11 @@ if not torch.cuda.is_available():
 # Singleton pattern to ensure model is loaded only once
 _MODEL_INSTANCE = None
 _TOKENIZER_INSTANCE = None
+_IS_UNSLOTH_MODEL = False
 
 class Llama3:
     def __init__(self, hf_token=None):
-        global _MODEL_INSTANCE, _TOKENIZER_INSTANCE
+        global _MODEL_INSTANCE, _TOKENIZER_INSTANCE, _IS_UNSLOTH_MODEL
         
         # If model is already loaded, reuse it
         if _MODEL_INSTANCE is not None and _TOKENIZER_INSTANCE is not None:
@@ -30,6 +31,7 @@ class Llama3:
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.padding_side = "left"
+            self.is_unsloth_model = _IS_UNSLOTH_MODEL
             return
         
         # Try to import unsloth for 4-bit optimization
@@ -48,6 +50,7 @@ class Llama3:
         
         # Set device
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.is_unsloth_model = False
         
         try:
             # Load model and tokenizer with pre-quantized 4-bit version from Unsloth
@@ -65,6 +68,8 @@ class Llama3:
                 token=token
             )
             print("Llama 3.1 model loaded successfully with Unsloth!")
+            self.is_unsloth_model = True
+            _IS_UNSLOTH_MODEL = True
             
             # Note: We do NOT need to move the model to device as it's already on the correct device
             # The error occurs because .to() is not supported for 4-bit/8-bit bitsandbytes models
@@ -124,16 +129,63 @@ class Llama3:
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        # Generate with standard generation - optimized for speed
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=1024,
-                eos_token_id=self.terminators,
-                do_sample=False,
-                pad_token_id=self.tokenizer.pad_token_id,
-                use_cache=True  # Ensure caching is enabled for faster generation
-            )
-        
-        # Decode and return
-        return self.tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        try:
+            # Generate with standard generation - optimized for speed
+            with torch.no_grad():
+                if self.is_unsloth_model:
+                    # Try using Unsloth's specialized generate method
+                    try:
+                        from unsloth import FastLanguageModel
+                        # Use a special method for Unsloth models that doesn't use paged attention
+                        outputs = FastLanguageModel.generate(
+                            model=self.model,
+                            tokenizer=self.tokenizer,
+                            prompts=[prompt],
+                            max_new_tokens=1024,
+                            temperature=0.0,  # Deterministic output
+                            top_p=1.0,
+                            use_cache=True
+                        )
+                        return outputs[0]  # Return the first (and only) output
+                        
+                    except (ImportError, AttributeError) as e:
+                        print(f"Warning: Unable to use Unsloth's FastLanguageModel.generate: {e}")
+                        print("Falling back to standard tokenizer-based approach...")
+                        # Continue with standard generation below
+                
+                # Standard generation approach
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=1024,
+                    eos_token_id=self.terminators,
+                    do_sample=False,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    use_cache=True
+                )
+                return self.tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        except Exception as e:
+            # If we get an error about paged_attention or other issues, try an even simpler approach
+            print(f"Error during generation: {e}")
+            print("Trying another approach with simple generation...")
+            
+            try:
+                input_ids = inputs["input_ids"]
+                attention_mask = inputs["attention_mask"]
+                
+                # Use a very simple greedy generation approach
+                with torch.no_grad():
+                    generated_ids = self.model.generate(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=1024,
+                        num_beams=1,  # Simple greedy search
+                        do_sample=False,
+                        use_cache=True
+                    )
+                    
+                # Decode and return only the new tokens
+                return self.tokenizer.decode(generated_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
+            except Exception as nested_e:
+                print(f"Error with simplified generation: {nested_e}")
+                # Last resort - return a message about the error
+                return f"Error generating response: {e}. The model may need to be updated or reinstalled."
