@@ -24,7 +24,7 @@ class Llama3:
         if _MODEL_INSTANCE is not None and _TOKENIZER_INSTANCE is not None:
             self.model = _MODEL_INSTANCE
             self.tokenizer = _TOKENIZER_INSTANCE
-            self.device = next(self.model.parameters()).device
+            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
             # Set terminators and padding once
             self.terminators = [self.tokenizer.eos_token_id]
             if self.tokenizer.pad_token is None:
@@ -56,6 +56,7 @@ class Llama3:
             dtype = None  # Auto detection (Float16 for Tesla T4, V100, Bfloat16 for Ampere+)
             load_in_4bit = True  # Use 4-bit quantization to reduce memory usage
             
+            print(f"Loading Llama 3.1 model with Unsloth {model_id}...")
             self.model, self.tokenizer = FastLanguageModel.from_pretrained(
                 model_name=model_id,
                 max_seq_length=max_seq_length,
@@ -63,10 +64,10 @@ class Llama3:
                 load_in_4bit=load_in_4bit,
                 token=token
             )
+            print("Llama 3.1 model loaded successfully with Unsloth!")
             
-            # Move model to device if needed
-            if torch.cuda.is_available():
-                self.model = self.model.to(self.device)
+            # Note: We do NOT need to move the model to device as it's already on the correct device
+            # The error occurs because .to() is not supported for 4-bit/8-bit bitsandbytes models
                 
         except Exception as e:
             print(f"Error loading Llama 3.1 model with unsloth: {e}")
@@ -95,14 +96,14 @@ class Llama3:
                     quantization_config=quantization_config,
                     token=token,
                     low_cpu_mem_usage=True
-                ).to(self.device)
+                )  # Note: No .to(device) for BitsAndBytes models
             else:
                 # Load without quantization on CPU
                 self.model = AutoModelForCausalLM.from_pretrained(
                     fallback_model_id,
                     token=token,
                     low_cpu_mem_usage=True
-                ).to(self.device)
+                )  # Will be on CPU by default
         
         # Set up terminators
         self.terminators = [
