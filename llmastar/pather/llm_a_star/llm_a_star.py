@@ -241,46 +241,46 @@ class LLMAStar:
         print(f"Number of obstacles: {len(self.obs)}")
         
         # Use the imported A* bidirectional algorithm directly
-        try:
-            # Call the a_star_bidirectional function with our grid, start, and goal
-            path_start, path_goal, search_path_start, search_path_goal = a_star_bidirectional(
-                self.s_start, self.s_goal, grid, connectivity=8
-            )
-            
-            # Check if a path was found
-            if path_start is None or path_goal is None:
-                print("No path found by bidirectional A*.")
-                # Fallback to regular A* algorithm
-                return self.searching(query, filepath)
-            
-            # Combine the paths
-            path = path_goal + path_start
-            
-            # Optimize the path if possible
-            optimized_path = optimize_path(path, grid, self.s_goal)
-            
-            # Calculate result metrics
-            search_paths = set(search_path_start + search_path_goal)
-            result = {
-                "operation": len(search_paths),
-                "storage": len(search_paths),
-                "length": sum(self._euclidean_distance(optimized_path[i], optimized_path[i+1]) for i in range(len(optimized_path)-1)),
-                "llm_output": self.target_list
-            }
-            print("Path found with bidirectional A*!")
-            print(result)
-            
-            # Visualize the path
-            visited = search_path_start + search_path_goal
-            self.plot.animation(optimized_path, visited, True, "LLM-A* Improved (Bidirectional)", self.filepath)
-            
-            return result
-            
-        except Exception as e:
-            print(f"Error using bidirectional A*: {str(e)}")
-            print("Falling back to regular A* algorithm.")
+        # try:
+        # Call the a_star_bidirectional function with our grid, start, and goal
+        path_start, path_goal, search_path_start, search_path_goal = a_star_bidirectional(
+            self.s_start, self.s_goal, grid, connectivity=8
+        )
+        
+        # Check if a path was found
+        if path_start is None or path_goal is None:
+            print("No path found by bidirectional A*.")
             # Fallback to regular A* algorithm
             return self.searching(query, filepath)
+        
+        # Combine the paths
+        path = path_goal + path_start
+        
+        # Optimize the path if possible
+        optimized_path = optimize_path(path, grid, self.s_goal)
+        
+        # Calculate result metrics
+        search_paths = set(search_path_start + search_path_goal)
+        result = {
+            "operation": len(search_paths),
+            "storage": len(search_paths),
+            "length": sum(self._euclidean_distance(optimized_path[i], optimized_path[i+1]) for i in range(len(optimized_path)-1)),
+            "llm_output": self.target_list
+        }
+        print("Path found with bidirectional A*!")
+        print(result)
+        
+        # Visualize the path
+        visited = search_path_start + search_path_goal
+        self.plot.animation(optimized_path, visited, True, "LLM-A* Improved (Bidirectional)", self.filepath)
+        
+        return result
+            
+        # except Exception as e:
+        #     print(f"Error using bidirectional A*: {str(e)}")
+        #     print("Falling back to regular A* algorithm.")
+        #     # Fallback to regular A* algorithm
+        #     return self.searching(query, filepath)
 
     @staticmethod
     def _euclidean_distance(p1, p2):
