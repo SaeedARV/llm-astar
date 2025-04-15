@@ -9,39 +9,49 @@ import time
 import math
 import json
 import random
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor
+from functools import partial
 from llmastar.pather import AStar, LLMAStar
 from tabulate import tabulate
 
-# Load the latest complex grid from the dataset
-def load_latest_grid():
-    with open('dataset/environment_50_30.json', 'r') as f:
+# Set multiprocessing start method to 'spawn' to avoid CUDA initialization issues
+multiprocessing.set_start_method('spawn', force=True)
+
+# Load a random grid from the dataset
+def load_random_grid():
+    with open('/content/llm-astar/dataset/environment_50_30.json', 'r') as f:
         data = json.load(f)
     
-    # Get the latest added grid (the last one in the list)
-    latest_grid = data[-1]
+    # Make sure we have grids to choose from
+    if not data:
+        raise ValueError("No grids found in the dataset. Please run generate_complex_grid.py first.")
+    
+    # Pick a random grid from the dataset
+    random_grid = random.choice(data)
     
     # Create a scenario from it
     scenario = {
-        "name": f"Complex Grid {latest_grid['id']}",
+        "name": f"Complex Grid {random_grid['id']}",
         "query": {
-            "start": latest_grid['start_goal'][0][0],
-            "goal": latest_grid['start_goal'][0][1],
-            "size": [latest_grid['range_x'][1], latest_grid['range_y'][1]],
-            "horizontal_barriers": latest_grid['horizontal_barriers'],
-            "vertical_barriers": latest_grid['vertical_barriers'],
-            "range_x": latest_grid['range_x'],
-            "range_y": latest_grid['range_y']
+            "start": random_grid['start_goal'][0][0],
+            "goal": random_grid['start_goal'][0][1],
+            "size": [random_grid['range_x'][1], random_grid['range_y'][1]],
+            "horizontal_barriers": random_grid['horizontal_barriers'],
+            "vertical_barriers": random_grid['vertical_barriers'],
+            "range_x": random_grid['range_x'],
+            "range_y": random_grid['range_y']
         }
     }
     
-    print(f"Loaded complex grid with ID {latest_grid['id']}")
-    print(f"Grid dimensions: {latest_grid['range_x'][1]}x{latest_grid['range_y'][1]}")
-    print(f"Start: {latest_grid['start_goal'][0][0]}, Goal: {latest_grid['start_goal'][0][1]}")
+    print(f"Loaded random complex grid with ID {random_grid['id']}")
+    print(f"Grid dimensions: {random_grid['range_x'][1]}x{random_grid['range_y'][1]}")
+    print(f"Start: {random_grid['start_goal'][0][0]}, Goal: {random_grid['start_goal'][0][1]}")
     
     return [scenario]  # Return as a list to maintain compatibility with existing code
 
-# Use the latest complex grid
-scenarios = load_latest_grid()
+# Use a random grid from the dataset
+scenarios = load_random_grid()
 
 # Define different LLM configurations to test
 llm_configs = [
@@ -102,6 +112,150 @@ llm_configs = [
     }
 ]
 
+# Function to run A* on a single segment (for parallel processing)
+def process_segment(start, end, query, use_improved_astar=False):
+    """Process a single path segment using A* or improved A*"""
+    # Create a new query with the segment's start and end points
+    segment_query = query.copy()
+    segment_query['start'] = start
+    segment_query['goal'] = end
+    
+    # Create a new A* instance for this segment
+    if use_improved_astar:
+        path_planner = LLMAStar(llm="llama", prompt="standard", use_improved_astar=True)
+        result = path_planner.searching_improved(segment_query)
+    else:
+        path_planner = AStar()
+        result = path_planner.searching(segment_query)
+    
+    return {
+        'start': start,
+        'end': end,
+        'path': result.get('path', []),
+        'operation_count': result.get('operation', 0),
+        'storage_used': result.get('storage', 0),
+        'length': result.get('length', 0)
+    }
+
+# Function to run the pathfinding in parallel across all waypoints
+def parallel_pathfinding(waypoints, query, use_improved_astar=False, max_workers=4):
+    """Process pathfinding between waypoints in parallel"""
+    if not waypoints or len(waypoints) < 2:
+        return {'operation_count': 0, 'storage_used': 0, 'length': 0, 'path': []}
+    
+    # Create the segment pairs
+    segments = []
+    for i in range(len(waypoints) - 1):
+        segments.append((waypoints[i], waypoints[i+1]))
+    
+    # Process segments in parallel
+    start_time = time.time()
+    results = []
+    
+    # Create a partial function with the query and improved flag
+    process_func = partial(process_segment, 
+                          query=query, 
+                          use_improved_astar=use_improved_astar)
+    
+    # Use ThreadPoolExecutor instead of ProcessPoolExecutor to avoid CUDA issues
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all segment tasks
+        future_to_segment = {
+            executor.submit(process_func, start, end): (start, end) 
+            for start, end in segments
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_segment):
+            segment = future_to_segment[future]
+            # try:
+            result = future.result()
+            results.append(result)
+            # except Exception as e:
+            #     print(f"Error processing segment {segment}: {e}")
+    
+    # Sort results by start position to maintain order
+    # We need to define a key function that matches the original segment order
+    segment_order = {tuple(segments[i]): i for i in range(len(segments))}
+    results.sort(key=lambda x: segment_order.get((tuple(x['start']), tuple(x['end'])), float('inf')))
+    
+    # Combine paths (removing duplicates at junctions)
+    combined_path = [waypoints[0]]  # Start with the first point
+    total_ops = 0
+    total_storage = 0
+    total_length = 0
+    
+    for result in results:
+        # Add the path segment (excluding the start point)
+        path_segment = result.get('path', [])
+        if path_segment and len(path_segment) > 1:
+            combined_path.extend(path_segment[1:])  # Skip the first point to avoid duplicates
+        
+        # Accumulate metrics
+        total_ops += result.get('operation_count', 0)
+        total_storage += result.get('storage_used', 0)
+        total_length += result.get('length', 0)
+    
+    execution_time = time.time() - start_time
+    
+    return {
+        'path': combined_path,
+        'operation_count': total_ops,
+        'storage_used': total_storage,
+        'length': total_length,
+        'time': execution_time
+    }
+
+# Sequential version of pathfinding for cases where parallel execution fails
+def sequential_pathfinding(waypoints, query, use_improved_astar=False):
+    """Process pathfinding between waypoints sequentially as a fallback"""
+    if not waypoints or len(waypoints) < 2:
+        return {'operation_count': 0, 'storage_used': 0, 'length': 0, 'path': []}
+    
+    start_time = time.time()
+    combined_path = [waypoints[0]]  # Start with the first point
+    total_ops = 0
+    total_storage = 0
+    total_length = 0
+    
+    # Process each segment sequentially
+    for i in range(len(waypoints) - 1):
+        start = waypoints[i]
+        end = waypoints[i+1]
+        
+        # Create a new query with the segment's start and end points
+        segment_query = query.copy()
+        segment_query['start'] = start
+        segment_query['goal'] = end
+        
+        # Create a new A* instance for this segment
+        if use_improved_astar:
+            path_planner = LLMAStar(llm="llama", prompt="standard", use_improved_astar=True)
+            result = path_planner.searching_improved(segment_query)
+        else:
+            path_planner = AStar()
+            result = path_planner.searching(segment_query)
+        
+        # Add the path segment (excluding the start point)
+        path_segment = result.get('path', [])
+        if path_segment and len(path_segment) > 1:
+            combined_path.extend(path_segment[1:])  # Skip the first point to avoid duplicates
+        
+        # Accumulate metrics
+        total_ops += result.get('operation', 0)
+        total_storage += result.get('storage', 0)
+        total_length += result.get('length', 0)
+    
+    execution_time = time.time() - start_time
+    
+    return {
+        'path': combined_path,
+        'operation_count': total_ops,
+        'storage_used': total_storage,
+        'length': total_length,
+        'time': execution_time
+    }
+
 def run_path_planning(algorithm, query, config=None, scenario_name=None):
     start_time = time.time()
     try:
@@ -117,14 +271,64 @@ def run_path_planning(algorithm, query, config=None, scenario_name=None):
                 path_planner = LLMAStar(llm=config["llm"], prompt=config["prompt"])
                 
             filepath = f"{config['name'].lower().replace(' ', '_')}_{scenario_name.lower().replace(' ', '_')}.png"
+            
+            # Use the search method which will select the appropriate algorithm based on the configuration
+            if hasattr(path_planner, 'search') and config and "use_improved_astar" in config:
+                result = path_planner.search(query=query, filepath=filepath)
+            else:
+                result = path_planner.searching(query=query, filepath=filepath)
+                
+            # Extract the waypoints from the LLM output
+            waypoints = []
+            if "llm_output" in result:
+                waypoints = result["llm_output"]
+                
+                # Print LLM response details
+                print("\n=== LLM RESPONSE DETAILS ===")
+                print(f"Config: {config['name']}")
+                print(f"Raw LLM output: {result.get('llm_output', 'None')}")
+                print(f"Number of waypoints: {len(waypoints)}")
+                print(f"Waypoints: {waypoints}")
+                if len(waypoints) == 2:
+                    print("Only start and goal points were returned by LLM")
+                elif len(waypoints) < 2:
+                    print("Warning: Insufficient waypoints returned by LLM")
+                else:
+                    print(f"Intermediate waypoints: {waypoints[1:-1]}")
+                print("============================\n")
+                
+                # Process waypoints in parallel if we have valid waypoints
+                if waypoints and len(waypoints) >= 2:
+                    print(f"Processing {len(waypoints)-1} path segments in parallel...")
+                    print(query)
+                    
+                    try:
+                        # Try parallel execution first
+                        parallel_result = parallel_pathfinding(
+                            waypoints=waypoints,
+                            query=query,
+                            use_improved_astar=config.get("use_improved_astar", False)
+                        )
+                    except Exception as e:
+                        # Fall back to sequential execution if parallel fails
+                        print(f"Parallel execution failed: {e}")
+                        print("Falling back to sequential processing...")
+                        parallel_result = sequential_pathfinding(
+                            waypoints=waypoints,
+                            query=query,
+                            use_improved_astar=config.get("use_improved_astar", False)
+                        )
+                    
+                    # Update the result with processing metrics
+                    result["operation"] = parallel_result["operation_count"]
+                    result["storage"] = parallel_result["storage_used"]
+                    result["length"] = parallel_result["length"]
+                    result["parallel_path"] = parallel_result["path"]
+            
         else:
+            # Standard A* without LLM
             path_planner = AStar()
             filepath = f"astar_{scenario_name.lower().replace(' ', '_')}.png"
-        
-        # Use the search method which will select the appropriate algorithm based on the configuration
-        if hasattr(path_planner, 'search') and config and "use_improved_astar" in config:
-            result = path_planner.search(query=query, filepath=filepath)
-        else:
             result = path_planner.searching(query=query, filepath=filepath)
             
         end_time = time.time()
@@ -138,6 +342,10 @@ def run_path_planning(algorithm, query, config=None, scenario_name=None):
         path = []
         if "llm_output" in result:
             path = result["llm_output"]
+            
+            # If we have a parallel path, use that for validation
+            if "parallel_path" in result:
+                path = result["parallel_path"]
         
         # Check if the path is valid
         valid_path = is_valid_path(path, query)
